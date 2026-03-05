@@ -1,0 +1,108 @@
+name: Parallel Multiple
+
+on:
+  workflow_dispatch:
+    inputs:
+      # --- OPTION 1: CHOOSE WINDOWS VERSION ---
+      runner_os:
+        description: 'Select Windows Version'
+        required: true
+        type: choice
+        default: windows-latest
+        options:
+          - windows-latest   # Windows 11 (Server 2025)
+          - windows-2025     # Windows 11 (Server 2025)
+          - windows-2022     # Windows 10 (Server 2022)
+      
+      # --- OPTION 2: CHOOSE NUMBER OF MACHINES ---
+      runner_count:
+        description: 'Number of Parallel Runners'
+        required: true
+        type: choice
+        default: '5'
+        options:
+          - '1'
+          - '2'
+          - '3'
+          - '4'
+          - '5'
+
+      # --- CRD CODES (Optional if not using all runners) ---
+      crd_code_1:
+        description: 'CRD Code (Device 1)'
+        required: false
+        type: string
+      crd_code_2:
+        description: 'CRD Code (Device 2)'
+        required: false
+        type: string
+      crd_code_3:
+        description: 'CRD Code (Device 3)'
+        required: false
+        type: string
+      crd_code_4:
+        description: 'CRD Code (Device 4)'
+        required: false
+        type: string
+      crd_code_5:
+        description: 'CRD Code (Device 5)'
+        required: false
+        type: string
+
+jobs:
+  remote_session:
+    name: Remote Session ${{ matrix.device }}
+    runs-on: ${{ github.event.inputs.runner_os }}
+    timeout-minutes: 60
+    
+    # This logic checks the "runner_count" input. 
+    # If you select "2", runners 3, 4, and 5 will be skipped automatically.
+    if: ${{ matrix.device <= fromJson(github.event.inputs.runner_count) }}
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - device: 1
+            crd_code: ${{ github.event.inputs.crd_code_1 }}
+          - device: 2
+            crd_code: ${{ github.event.inputs.crd_code_2 }}
+          - device: 3
+            crd_code: ${{ github.event.inputs.crd_code_3 }}
+          - device: 4
+            crd_code: ${{ github.event.inputs.crd_code_4 }}
+          - device: 5
+            crd_code: ${{ github.event.inputs.crd_code_5 }}
+
+    steps:
+      - name: Install and Start Chrome Remote Desktop
+        shell: pwsh
+        run: |
+          $code = "${{ matrix.crd_code }}"
+          
+          # Safety check: If user selected 5 runners but forgot a code, fail gracefully
+          if ([string]::IsNullOrWhiteSpace($code)) {
+            Write-Error "❌ Error: You selected to run Device ${{ matrix.device }}, but no CRD Code was entered."
+            exit 1
+          }
+
+          Write-Host "Installing CRD for Device ${{ matrix.device }} on ${{ github.event.inputs.runner_os }}..."
+          
+          Invoke-WebRequest -Uri "https://dl.google.com/dl/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi" -OutFile "crd_host.msi"
+          
+          Start-Process msiexec.exe -Wait -ArgumentList '/i crd_host.msi /quiet'
+          
+          & "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe" --code="$code" --redirect-url="https://remotedesktop.google.com/_/oauthredirect" --name="${{ env.COMPUTERNAME }}-${{ matrix.device }}" --pin="112233"
+          
+          Write-Host "=============================================="
+          Write-Host "✅ Chrome Remote Desktop is configured."
+          Write-Host "   Connect to: ${{ env.COMPUTERNAME }}-${{ matrix.device }}"
+          Write-Host "   Access PIN: 112233"
+          Write-Host "=============================================="
+
+      - name: Keep Runner Alive
+        if: success()
+        shell: pwsh
+        run: |
+          Write-Host "Session is active. This runner will remain online until the job timeout is reached."
+          Start-Sleep -Seconds 3600
