@@ -1,20 +1,18 @@
-name: Parallel macOS
+name: Parallel macOS 
 
 on:
   workflow_dispatch:
     inputs:
-      # --- OPTION 1: CHOOSE MACOS VERSION ---
       runner_os:
         description: 'Select macOS Version'
         required: true
         type: choice
         default: macos-latest
         options:
-          - macos-latest   # macOS 14 (Sonoma) - ARM64
-          - macos-13       # macOS 13 (Ventura) - Intel
-          - macos-12       # macOS 12 (Monterey) - Intel
+          - macos-latest   # macOS 14 (Sonoma)
+          - macos-13       # macOS 13 (Ventura)
+          - macos-12       # macOS 12 (Monterey)
       
-      # --- OPTION 2: CHOOSE NUMBER OF MACHINES ---
       runner_count:
         description: 'Number of Parallel Runners'
         required: true
@@ -27,25 +25,24 @@ on:
           - '4'
           - '5'
 
-      # --- NGROK TOKENS (One per machine) ---
       ngrok_auth_1:
-        description: 'Ngrok Token for Device 1'
+        description: 'Ngrok Token (Device 1)'
         required: true
         type: string
       ngrok_auth_2:
-        description: 'Ngrok Token for Device 2'
+        description: 'Ngrok Token (Device 2)'
         required: false
         type: string
       ngrok_auth_3:
-        description: 'Ngrok Token for Device 3'
+        description: 'Ngrok Token (Device 3)'
         required: false
         type: string
       ngrok_auth_4:
-        description: 'Ngrok Token for Device 4'
+        description: 'Ngrok Token (Device 4)'
         required: false
         type: string
       ngrok_auth_5:
-        description: 'Ngrok Token for Device 5'
+        description: 'Ngrok Token (Device 5)'
         required: false
         type: string
 
@@ -71,64 +68,62 @@ jobs:
             ngrok_token: ${{ github.event.inputs.ngrok_auth_5 }}
 
     steps:
-      - name: Install and Configure VNC & Ngrok
-        # Only run if this device number is requested
+      - name: Create Admin User & Configure VNC
         if: ${{ matrix.device <= fromJson(github.event.inputs.runner_count) }}
         env:
           NGROK_AUTH_TOKEN: ${{ matrix.ngrok_token }}
-          VNC_PASSWORD: "password123" # Simple password for VNC connection
+          # This will be the password for BOTH the new user and VNC
+          MY_PASSWORD: "Password123!" 
         run: |
-          # 1. Validate Token
           if [ -z "$NGROK_AUTH_TOKEN" ]; then
-            echo "❌ Error: Device ${{ matrix.device }} was selected, but no Ngrok Token was provided."
+            echo "❌ Error: No Ngrok Token provided for Device ${{ matrix.device }}."
             exit 1
           fi
 
-          echo "Installing prerequisites on ${{ github.event.inputs.runner_os }}..."
+          echo "🔧 Creating new admin user 'adminuser'..."
+          # 1. Create a new user named 'adminuser'
+          sudo dscl . -create /Users/adminuser
+          sudo dscl . -create /Users/adminuser UserShell /bin/bash
+          sudo dscl . -create /Users/adminuser RealName "Admin User"
+          sudo dscl . -create /Users/adminuser UniqueID "502"
+          sudo dscl . -create /Users/adminuser PrimaryGroupID 20
+          sudo dscl . -create /Users/adminuser NFSHomeDirectory /Users/adminuser
           
-          # 2. Install Ngrok via Homebrew
-          brew install ngrok/ngrok/ngrok
+          # 2. Set the password for 'adminuser'
+          sudo dscl . -passwd /Users/adminuser "$MY_PASSWORD"
+          
+          # 3. Grant Admin Privileges
+          sudo dscl . -append /Groups/admin GroupMembership adminuser
 
-          # 3. Configure Ngrok
+          echo "🔧 Installing Ngrok..."
+          brew install ngrok/ngrok/ngrok
           ngrok config add-authtoken $NGROK_AUTH_TOKEN
 
-          # 4. Enable macOS Screen Sharing (VNC)
-          # This creates a VNC server on port 5900 with password authentication
+          echo "🔧 Enabling Screen Sharing..."
+          # 4. Enable VNC and allow the new user to login
           sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
           -activate -configure -access -on \
           -clientopts -setvnclegacy -vnclegacy yes \
-          -clientopts -setvncpw -vncpw $VNC_PASSWORD \
+          -clientopts -setvncpw -vncpw "$MY_PASSWORD" \
           -restart -agent -privs -all
 
-          # 5. Start Ngrok Tunnel (TCP 5900)
-          # We run this in the background (&)
+          # Start Ngrok Tunnel
           ngrok tcp 5900 --log=stdout > ngrok.log &
-
-          echo "Waiting for Ngrok tunnel to initialize..."
+          
+          echo "Waiting for tunnel..."
           sleep 10
-
-          # 6. Extract the Public URL
-          # Ngrok provides a local API at localhost:4040 to get tunnel details
           NGROK_URL=$(curl -s http://localhost:4040/api/tunnels | jq -r '.tunnels[0].public_url')
 
-          if [ "$NGROK_URL" == "null" ]; then
-            echo "❌ Error: Ngrok tunnel failed to start. Check your token."
-            exit 1
-          fi
-
           echo "========================================================="
-          echo "✅ macOS Remote Session Ready!"
-          echo "   Device: ${{ matrix.device }}"
+          echo "✅ LOGIN DETAILS (USE THESE EXACTLY)"
           echo "---------------------------------------------------------"
-          echo "🖥️  Connect via VNC Viewer (RealVNC, Remmina, etc)"
-          echo "🔗  URL: $NGROK_URL"
-          echo "🔑  Password: $VNC_PASSWORD"
+          echo "👤 Username: adminuser"
+          echo "🔑 Password: Password123!"
+          echo "🔗 URL:      $NGROK_URL"
           echo "========================================================="
 
       - name: Keep Runner Alive
-        # Keep alive only if successful and within selected count
         if: ${{ success() && matrix.device <= fromJson(github.event.inputs.runner_count) }}
         run: |
-          echo "Session is active. Keeping alive for 60 minutes..."
-          # Fixed the sleep command below
+          echo "Session active. Sleeping for 60 mins..."
           sleep 3600
