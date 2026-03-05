@@ -1,4 +1,4 @@
-name: Parallel MacOS
+name: Parallel macOS
 
 on:
   workflow_dispatch:
@@ -33,19 +33,19 @@ on:
         required: true
         type: string
       ngrok_auth_2:
-        description: 'Ngrok Token for Device 2 (Optional)'
+        description: 'Ngrok Token for Device 2'
         required: false
         type: string
       ngrok_auth_3:
-        description: 'Ngrok Token for Device 3 (Optional)'
+        description: 'Ngrok Token for Device 3'
         required: false
         type: string
       ngrok_auth_4:
-        description: 'Ngrok Token for Device 4 (Optional)'
+        description: 'Ngrok Token for Device 4'
         required: false
         type: string
       ngrok_auth_5:
-        description: 'Ngrok Token for Device 5 (Optional)'
+        description: 'Ngrok Token for Device 5'
         required: false
         type: string
 
@@ -129,6 +129,6 @@ jobs:
         # Keep alive only if successful and within selected count
         if: ${{ success() && matrix.device <= fromJson(github.event.inputs.runner_count) }}
         run: |
-          echo "Session is active. This runner will remain online until the 60-minute timeout."
-          # Sleep for 1 hour
-          sleep 3600hhhhhhhhhhhhhhhhhhhhhhhhh
+          echo "Session is active. Keeping alive for 60 minutes..."
+          # Fixed the sleep command below
+          sleep 3600
