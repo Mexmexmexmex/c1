@@ -13,7 +13,8 @@ on:
           - windows-latest   # Windows 11 (Server 2025)
           - windows-2025     # Windows 11 (Server 2025)
           - windows-2022     # Windows 10 (Server 2022)
-      
+          
+
       # --- OPTION 2: CHOOSE NUMBER OF MACHINES ---
       runner_count:
         description: 'Number of Parallel Runners'
@@ -27,7 +28,7 @@ on:
           - '4'
           - '5'
 
-      # --- CRD CODES (Optional if not using all runners) ---
+      # --- CRD CODES ---
       crd_code_1:
         description: 'CRD Code (Device 1)'
         required: false
@@ -55,10 +56,6 @@ jobs:
     runs-on: ${{ github.event.inputs.runner_os }}
     timeout-minutes: 60
     
-    # This logic checks the "runner_count" input. 
-    # If you select "2", runners 3, 4, and 5 will be skipped automatically.
-    if: ${{ matrix.device <= fromJson(github.event.inputs.runner_count) }}
-    
     strategy:
       fail-fast: false
       matrix:
@@ -76,13 +73,14 @@ jobs:
 
     steps:
       - name: Install and Start Chrome Remote Desktop
+        # logic moved here: only run this step if device number <= selected count
+        if: ${{ matrix.device <= fromJson(github.event.inputs.runner_count) }}
         shell: pwsh
         run: |
           $code = "${{ matrix.crd_code }}"
           
-          # Safety check: If user selected 5 runners but forgot a code, fail gracefully
           if ([string]::IsNullOrWhiteSpace($code)) {
-            Write-Error "❌ Error: You selected to run Device ${{ matrix.device }}, but no CRD Code was entered."
+            Write-Error "❌ Error: Device ${{ matrix.device }} selected but no CRD Code provided."
             exit 1
           }
 
@@ -101,7 +99,8 @@ jobs:
           Write-Host "=============================================="
 
       - name: Keep Runner Alive
-        if: success()
+        # logic moved here: only run this step if device number <= selected count
+        if: ${{ success() && matrix.device <= fromJson(github.event.inputs.runner_count) }}
         shell: pwsh
         run: |
           Write-Host "Session is active. This runner will remain online until the job timeout is reached."
