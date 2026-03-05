@@ -1,0 +1,134 @@
+name: Parallel MacOS
+
+on:
+  workflow_dispatch:
+    inputs:
+      # --- OPTION 1: CHOOSE MACOS VERSION ---
+      runner_os:
+        description: 'Select macOS Version'
+        required: true
+        type: choice
+        default: macos-latest
+        options:
+          - macos-latest   # macOS 14 (Sonoma) - ARM64
+          - macos-13       # macOS 13 (Ventura) - Intel
+          - macos-12       # macOS 12 (Monterey) - Intel
+      
+      # --- OPTION 2: CHOOSE NUMBER OF MACHINES ---
+      runner_count:
+        description: 'Number of Parallel Runners'
+        required: true
+        type: choice
+        default: '1'
+        options:
+          - '1'
+          - '2'
+          - '3'
+          - '4'
+          - '5'
+
+      # --- NGROK TOKENS (One per machine) ---
+      ngrok_auth_1:
+        description: 'Ngrok Token for Device 1'
+        required: true
+        type: string
+      ngrok_auth_2:
+        description: 'Ngrok Token for Device 2 (Optional)'
+        required: false
+        type: string
+      ngrok_auth_3:
+        description: 'Ngrok Token for Device 3 (Optional)'
+        required: false
+        type: string
+      ngrok_auth_4:
+        description: 'Ngrok Token for Device 4 (Optional)'
+        required: false
+        type: string
+      ngrok_auth_5:
+        description: 'Ngrok Token for Device 5 (Optional)'
+        required: false
+        type: string
+
+jobs:
+  macos_vnc_session:
+    name: Mac Session ${{ matrix.device }}
+    runs-on: ${{ github.event.inputs.runner_os }}
+    timeout-minutes: 60
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - device: 1
+            ngrok_token: ${{ github.event.inputs.ngrok_auth_1 }}
+          - device: 2
+            ngrok_token: ${{ github.event.inputs.ngrok_auth_2 }}
+          - device: 3
+            ngrok_token: ${{ github.event.inputs.ngrok_auth_3 }}
+          - device: 4
+            ngrok_token: ${{ github.event.inputs.ngrok_auth_4 }}
+          - device: 5
+            ngrok_token: ${{ github.event.inputs.ngrok_auth_5 }}
+
+    steps:
+      - name: Install and Configure VNC & Ngrok
+        # Only run if this device number is requested
+        if: ${{ matrix.device <= fromJson(github.event.inputs.runner_count) }}
+        env:
+          NGROK_AUTH_TOKEN: ${{ matrix.ngrok_token }}
+          VNC_PASSWORD: "password123" # Simple password for VNC connection
+        run: |
+          # 1. Validate Token
+          if [ -z "$NGROK_AUTH_TOKEN" ]; then
+            echo "❌ Error: Device ${{ matrix.device }} was selected, but no Ngrok Token was provided."
+            exit 1
+          fi
+
+          echo "Installing prerequisites on ${{ github.event.inputs.runner_os }}..."
+          
+          # 2. Install Ngrok via Homebrew
+          brew install ngrok/ngrok/ngrok
+
+          # 3. Configure Ngrok
+          ngrok config add-authtoken $NGROK_AUTH_TOKEN
+
+          # 4. Enable macOS Screen Sharing (VNC)
+          # This creates a VNC server on port 5900 with password authentication
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
+          -activate -configure -access -on \
+          -clientopts -setvnclegacy -vnclegacy yes \
+          -clientopts -setvncpw -vncpw $VNC_PASSWORD \
+          -restart -agent -privs -all
+
+          # 5. Start Ngrok Tunnel (TCP 5900)
+          # We run this in the background (&)
+          ngrok tcp 5900 --log=stdout > ngrok.log &
+
+          echo "Waiting for Ngrok tunnel to initialize..."
+          sleep 10
+
+          # 6. Extract the Public URL
+          # Ngrok provides a local API at localhost:4040 to get tunnel details
+          NGROK_URL=$(curl -s http://localhost:4040/api/tunnels | jq -r '.tunnels[0].public_url')
+
+          if [ "$NGROK_URL" == "null" ]; then
+            echo "❌ Error: Ngrok tunnel failed to start. Check your token."
+            exit 1
+          fi
+
+          echo "========================================================="
+          echo "✅ macOS Remote Session Ready!"
+          echo "   Device: ${{ matrix.device }}"
+          echo "---------------------------------------------------------"
+          echo "🖥️  Connect via VNC Viewer (RealVNC, Remmina, etc)"
+          echo "🔗  URL: $NGROK_URL"
+          echo "🔑  Password: $VNC_PASSWORD"
+          echo "========================================================="
+
+      - name: Keep Runner Alive
+        # Keep alive only if successful and within selected count
+        if: ${{ success() && matrix.device <= fromJson(github.event.inputs.runner_count) }}
+        run: |
+          echo "Session is active. This runner will remain online until the 60-minute timeout."
+          # Sleep for 1 hour
+          sleep 3600hhhhhhhhhhhhhhhhhhhhhhhhh
