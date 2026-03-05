@@ -68,44 +68,40 @@ jobs:
             ngrok_token: ${{ github.event.inputs.ngrok_auth_5 }}
 
     steps:
-      - name: Create Admin User & Configure VNC
+      - name: Configure VNC and TCC Permissions
         if: ${{ matrix.device <= fromJson(github.event.inputs.runner_count) }}
         env:
           NGROK_AUTH_TOKEN: ${{ matrix.ngrok_token }}
-          # This will be the password for BOTH the new user and VNC
           MY_PASSWORD: "Password123!" 
         run: |
-          if [ -z "$NGROK_AUTH_TOKEN" ]; then
+          if[ -z "$NGROK_AUTH_TOKEN" ]; then
             echo "❌ Error: No Ngrok Token provided for Device ${{ matrix.device }}."
             exit 1
           fi
           
-          echo "🔧 Creating new admin user 'adminuser'..."
-          # 1. Create a new user named 'adminuser'
-          sudo dscl . -create /Users/adminuser
-          sudo dscl . -create /Users/adminuser UserShell /bin/bash
-          sudo dscl . -create /Users/adminuser RealName "Admin User"
-          sudo dscl . -create /Users/adminuser UniqueID "502"
-          sudo dscl . -create /Users/adminuser PrimaryGroupID 20
-          sudo dscl . -create /Users/adminuser NFSHomeDirectory /Users/adminuser
+          echo "🔧 Setting password for the active 'runner' user..."
+          # ✅ FIX 1: Use the default 'runner' account to hook into the active physical display
+          sudo dscl . -passwd /Users/runner "$MY_PASSWORD"
           
-          # 2. Set the password for 'adminuser'
-          sudo dscl . -passwd /Users/adminuser "$MY_PASSWORD"
-          
-          # 3. Grant Admin Privileges
-          sudo dscl . -append /Groups/admin GroupMembership adminuser
-
-          # ✅ FIX 1: Generate the physical home directory so the macOS Desktop can load
-          sudo createhomedir -c -u adminuser
+          echo "🔧 Bypassing macOS TCC Screen Capture restrictions..."
+          # ✅ FIX 2: Inject Screen Recording permissions directly into the macOS TCC database
+          os_version=$(sw_vers -productVersion | cut -d. -f1)
+          for agent in "com.apple.screensharing.agent" "com.apple.RemoteDesktop.agent"; do
+            if [ "$os_version" -ge 14 ]; then
+              sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" "INSERT OR REPLACE INTO access VALUES('kTCCServiceScreenCapture','$agent',0,2,4,1,NULL,NULL,0,'UNUSED',NULL,0,1687786159,NULL,NULL,'UNUSED',1687786159);"
+            else
+              sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" "INSERT OR REPLACE INTO access VALUES('kTCCServiceScreenCapture','$agent',0,2,4,1,NULL,NULL,0,'UNUSED',NULL,0,1687786159);"
+            fi
+          done
           
           echo "🔧 Installing Ngrok..."
           brew install ngrok/ngrok/ngrok
           ngrok config add-authtoken $NGROK_AUTH_TOKEN
           
           echo "🔧 Enabling Screen Sharing..."
-          # ✅ FIX 2: Enable VNC and explicitly grant access to the new 'adminuser'
+          # Grant access to 'runner'
           sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
-            -activate -configure -access -on -users adminuser \
+            -activate -configure -access -on -users runner \
             -clientopts -setvnclegacy -vnclegacy yes \
             -clientopts -setvncpw -vncpw "$MY_PASSWORD" \
             -restart -agent -privs -all
@@ -120,7 +116,7 @@ jobs:
           echo "========================================================="
           echo "✅ LOGIN DETAILS (USE THESE EXACTLY)"
           echo "---------------------------------------------------------"
-          echo "👤 Username: adminuser"
+          echo "👤 Username: runner"
           echo "🔑 Password: Password123!"
           echo "🔗 URL:      $NGROK_URL"
           echo "========================================================="
