@@ -79,7 +79,7 @@ jobs:
             echo "❌ Error: No Ngrok Token provided for Device ${{ matrix.device }}."
             exit 1
           fi
-
+          
           echo "🔧 Creating new admin user 'adminuser'..."
           # 1. Create a new user named 'adminuser'
           sudo dscl . -create /Users/adminuser
@@ -95,25 +95,28 @@ jobs:
           # 3. Grant Admin Privileges
           sudo dscl . -append /Groups/admin GroupMembership adminuser
 
+          # ✅ FIX 1: Generate the physical home directory so the macOS Desktop can load
+          sudo createhomedir -c -u adminuser
+          
           echo "🔧 Installing Ngrok..."
           brew install ngrok/ngrok/ngrok
           ngrok config add-authtoken $NGROK_AUTH_TOKEN
-
+          
           echo "🔧 Enabling Screen Sharing..."
-          # 4. Enable VNC and allow the new user to login
+          # ✅ FIX 2: Enable VNC and explicitly grant access to the new 'adminuser'
           sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
-          -activate -configure -access -on \
-          -clientopts -setvnclegacy -vnclegacy yes \
-          -clientopts -setvncpw -vncpw "$MY_PASSWORD" \
-          -restart -agent -privs -all
-
+            -activate -configure -access -on -users adminuser \
+            -clientopts -setvnclegacy -vnclegacy yes \
+            -clientopts -setvncpw -vncpw "$MY_PASSWORD" \
+            -restart -agent -privs -all
+            
           # Start Ngrok Tunnel
           ngrok tcp 5900 --log=stdout > ngrok.log &
           
           echo "Waiting for tunnel..."
           sleep 10
           NGROK_URL=$(curl -s http://localhost:4040/api/tunnels | jq -r '.tunnels[0].public_url')
-
+          
           echo "========================================================="
           echo "✅ LOGIN DETAILS (USE THESE EXACTLY)"
           echo "---------------------------------------------------------"
